@@ -1,0 +1,164 @@
+---
+title: "Final Project"
+author: "Yuxi Wang"
+format: gfm
+jupyter: python3
+---
+
+### Introduction
+
+Mobile gaming is a fast-growing and highly profitable industry, and understanding why players spend money can meaningfully shape game design and revenue strategies. If developers can better anticipate spending behavior, they can design more effective pricing models, personalized offers, and targeted features.
+
+This motivates two guiding questions for my analysis:
+
+Q1: Which behavioral features are most strongly associated with players’ in-app spending?
+Q2: Do spending levels differ across game genres?
+
+By examining these questions, we may find some behavioral and genre-based patterns that help explain how and why players choose to spend.
+
+### The Data
+
+The data -- `mobile_game_inapp_purchases.csv` -- comes from a Kaggle dataset on mobile game monetization behavior. It contains player-level information on demographics, gameplay activity, device type, game genre, and in-app purchase history. The dataset includes variables such as age, gender, country, session counts, average session length, engagement metrics, spending amounts, and timestamps of the last purchase. These fields allow us to analyze both behavioral patterns and spending behavior. Several variables, such as SessionCount, AverageSessionLength, and the engineered EngagementScore, reflect how actively players engage with the game. The InAppPurchaseAmount variable captures the total amount each player has spent on in-app purchases.
+
+Together, these variables provide a detailed view of player behavior and spending patterns, making it possible to explore what drives monetization in mobile games.
+
+### Read
+
+```{python}
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import statsmodels.api as sm
+
+purchases = pd.read_csv("/Users/xixi/Desktop/wrangling_final/mobile_game_inapp_purchases.csv", encoding='latin-1')
+
+purchases.head()
+purchases.info()
+purchases.describe(include='all')
+```
+
+So we see we have 3024 samples in the mobile_game_inapp_purchases dataset.
+
+### Feature Engineering
+
+```{python}
+purchases['EngagementScore'] = purchases['SessionCount'] * purchases['AverageSessionLength']
+purchases.describe(include='all')
+```
+
+To better capture how actively players interact with the game, I created an EngagementScore that combines two key behaviors: how often players log in and how long they tend to stay. SessionCount and AverageSessionLength each describe different dimensions of activity, but on their own they offer only a partial view. By multiplying them, the engagement score reflects the overall intensity of gameplay, making it a more comprehensive measure when evaluating whether higher engagement translates into higher spending.
+
+### Feature Cleaning
+
+```{python}
+purchases = purchases.dropna(subset = ['Age', 'Gender', 'Country', 'Device', 'GameGenre'])
+
+purchases['InAppPurchaseAmount'] = pd.to_numeric(purchases['InAppPurchaseAmount'], errors='coerce').fillna(0)
+
+purchases['LastPurchaseDate'] = pd.to_datetime(purchases['LastPurchaseDate'], errors='coerce')
+
+purchases = purchases.drop(columns='UserID')
+
+purchases.describe(include='all')
+purchases.shape
+```
+
+Before analyzing spending behavior, I cleaned and standardized the dataset to ensure that all key variables were available for numerical and time-based calculations. Now the final modeling dataset contains 2734 valid samples after preprocessing.
+
+### Question 1: Which behavioral features are most strongly associated with players’ in-app spending?
+
+### Reshaping
+
+To make behavioral metrics easier to analyze and visualize, I reshaped the dataset into a long format.
+
+```{python}
+behavior_cols = ['EngagementScore','AverageSessionLength','SessionCount']
+purchases_long = purchases.melt(
+    id_vars='GameGenre',
+    value_vars=behavior_cols,
+    var_name='behavior_metric',
+    value_name='value'
+)
+purchases_long.head()
+```
+
+#### Iteration
+
+To understand which engagement behaviors might influence spending, I iterated through each behavioral variable and computed its correlation with in-app purchase amount.
+
+```{python}
+corr_results = []
+
+for col in behavior_cols:
+    corr = purchases['InAppPurchaseAmount'].corr(purchases[col])
+    corr_results.append((col, corr))
+
+results_spend = pd.DataFrame(corr_results, columns=['Variable','Correlation'])
+
+results_spend
+```
+
+Based on the correlation analysis across three engagement variables,
+none of the behavioral metrics show a strong linear relationship with spending. SessionCount has the highest correlation value of 0.03 with spending, although still weak, while EngagementScore and AverageSessionLength are close to zero. 
+
+This suggests that spending behavior is not well explained by basic activity levels.
+
+#### Regression Model
+
+```{python}
+X = purchases[behavior_cols]
+X = sm.add_constant(X)
+y = purchases['InAppPurchaseAmount']
+
+model = sm.OLS(y, X).fit()
+model.summary()
+```
+
+The regression model further confirms that behavioral metrics explain almost none of the variation in spending. All coefficients are close to zero and statistically insignificant, and the R-squared value is only 0.002.
+
+### Question 2: Do spending levels vary across game genres?
+
+#### Summarizing
+
+To compare monetization patterns across different types of games, I summarized spending and engagement by game genre.
+
+```{python}
+genre_summary = purchases.groupby('GameGenre').agg(
+    avg_spend=('InAppPurchaseAmount','mean'),
+    total_spend=('InAppPurchaseAmount','sum'),
+    count=('InAppPurchaseAmount','count'),
+    avg_engagement=('EngagementScore','mean')
+)
+
+genre_summary.sort_values('avg_spend', ascending=False)
+```
+
+According to the result, battle Royale players spend the most on average, approximately $158 per player and also generate the highest total spending. Strategy and Racing genres follow as the next highest spenders.
+
+Simultaneously, card games have the highest engagement score but relatively moderate spending, suggesting that high engagement does not necessarily translate into higher spending.
+
+#### Visualizing
+
+```{python}
+plt.figure(figsize=(10,6))
+sns.barplot(
+    data=genre_summary.reset_index(),
+    x="avg_spend",
+    y="GameGenre"
+)
+
+plt.xlabel("Average Spending")
+plt.ylabel("Game Genre")
+plt.title("Average In-App Spending by Game Genre")
+plt.show()
+```
+
+The bar chart clearly shows these differences, with Battle Royale and Strategy leading all other genres in average spending.
+
+### Conclusion
+
+Across both research questions, the analysis suggests that player spending is not strongly tied to basic engagement behaviors. Correlations between spending and activity metrics are extremely weak, and the regression model confirms that these variables explain almost none of the variation in in-app purchase amounts. This indicates that simple activity levels are not reliable predictors of how much a player spends.
+
+However, spending patterns do vary substantially across game genres. Genres with competitive or fast-paced gameplay, such as Battle Royale, show the highest average spending, while genres like Strategy and Racing also rank among top spenders. In contrast, genres with high engagement scores like Card games do not necessarily exhibit high spending levels, highlighting an important distinction between playing more and spending more.
+
+Taken together, these findings suggest that monetization behavior is shaped less by how intensely players engage with a game, and more by the type of game they choose to play. Understanding genre-level spending tendencies may provide developers with a more reliable starting point when designing pricing strategies or in-game purchase systems.
